@@ -3,8 +3,15 @@ from flask_socketio import SocketIO, emit
 import random
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "secret"
-socketio = SocketIO(app)
+
+# IMPORTANT: polling + threading for Render Free
+socketio = SocketIO(
+    app,
+    async_mode="threading",
+    cors_allowed_origins="*",
+    transports=["polling"],
+    allow_upgrades=False
+)
 
 users = {}
 
@@ -12,57 +19,22 @@ users = {}
 def index():
     return render_template("index.html")
 
-
 @socketio.on("connect")
 def handle_connect():
     username = f"User_{random.randint(1000,9999)}"
-    gender = random.choice(["boy", "girl"])
-    avatar = f"https://avatar.iran.liara.run/public/{gender}?username={username}"
+    gender = random.choice(["girl", "boy"])
+    avatar_url = f"https://avatar.iran.liara.run/public/{gender}?username={username}"
 
     users[request.sid] = {
         "username": username,
-        "avatar": avatar
+        "avatar": avatar_url
     }
 
     emit("set_username", {"username": username})
-    emit("user_joined", {"username": username, "avatar": avatar}, broadcast=True)
-
-
-@socketio.on("send_message")
-def handle_send_message(data):
-    user = users.get(request.sid)
-    if not user:
-        return
-
-    emit(
-        "new_message",
-        {
-            "username": user["username"],
-            "message": data["message"],
-            "avatar": user["avatar"]
-        },
-        broadcast=True
-    )
-
-
-@socketio.on("update_username")
-def handle_update_username(data):
-    user = users.get(request.sid)
-    if not user:
-        return
-
-    old_username = user["username"]
-    user["username"] = data["username"]
-
-    emit(
-        "username_updated",
-        {
-            "old_username": old_username,
-            "new_username": user["username"]
-        },
-        broadcast=True
-    )
-
+    emit("user_joined", {
+        "username": username,
+        "avatar": avatar_url
+    }, broadcast=True)
 
 @socketio.on("disconnect")
 def handle_disconnect():
@@ -70,6 +42,32 @@ def handle_disconnect():
     if user:
         emit("user_left", {"username": user["username"]}, broadcast=True)
 
+@socketio.on("send_message")
+def handle_message(data):
+    user = users.get(request.sid)
+    if not user:
+        return
+
+    emit("new_message", {
+        "username": user["username"],
+        "avatar": user["avatar"],
+        "message": data.get("message", "")
+    }, broadcast=True)
+
+@socketio.on("update_username")
+def handle_update_username(data):
+    user = users.get(request.sid)
+    if not user:
+        return
+
+    old = user["username"]
+    new = data.get("username", old)
+    user["username"] = new
+
+    emit("username_updated", {
+        "old_username": old,
+        "new_username": new
+    }, broadcast=True)
 
 if __name__ == "__main__":
-    socketio.run(app, debug=True)
+    socketio.run(app)
